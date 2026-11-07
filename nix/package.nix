@@ -49,7 +49,11 @@ let
       (
         lib.composeManyExtensions [
           pyproject-build-systems.overlays.wheel
-          workspace.mkPyprojectOverlay { sourcePreference = "wheel"; }
+          # Parentheses are load-bearing: list elements are not function
+          # applications, so without them this entry is two overlays (the
+          # unapplied mkPyprojectOverlay plus its attrset, neither of which is
+          # an overlay) and the composed extension recurses into itself.
+          (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
         ]
       );
 
