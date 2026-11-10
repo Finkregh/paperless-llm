@@ -7,6 +7,8 @@ taxonomy endpoints."""
 
 from __future__ import annotations
 
+from typing import cast
+
 import respx
 from httpx import Response
 from pydantic_ai import Agent
@@ -410,7 +412,14 @@ async def test_streaming_indexerror_fallback_discards_aborted_drafts(
                 raise IndexError("list index out of range")
             return await inner.run(*args, **kwargs)
 
-    outcome = await run_agent_turn(paperless_client, db, session, "go", agent=FlakyAgent())
+    outcome = await run_agent_turn(
+        paperless_client,
+        db,
+        session,
+        "go",
+        # Test double: it only implements the `run` the runner calls.
+        agent=cast("Agent[AgentDeps, str]", FlakyAgent()),
+    )
     assert calls["n"] == 2  # fallback actually re-ran
 
     from sqlalchemy import select
@@ -477,3 +486,95 @@ async def test_finalize_never_supersedes_a_concurrently_applied_proposal(db, pap
     assert new.status == ProposalStatus.pending
     assert new.supersedes_id is None  # applied things are history, not revisions
     assert new.revision == 1
+
+
+@respx.mock
+async def test_taxonomy_turn_survives_its_own_endpoint_admission(db, paperless_client, monkeypatch):
+    """INCIDENT 2026-11-10 (tag 'Rente', the first taxonomy session): the
+    runner holds an endpoint permit for the whole turn, and the taxonomy
+    prompt tells the model to hunt duplicates with find_similar_entities
+    -> embeddings, which the DEPLOYED config points at the agent's own
+    endpoint (`llm.agent.max_concurrent=1`, embeddings on the same
+    base_url). asyncio.Semaphore is not reentrant, so the turn waited on
+    a permit only it could release; nothing times out an acquire, so the
+    step stayed `running` and the UI showed 'working' indefinitely."""
+    import asyncio
+    import json
+
+    from app.config import reset_settings_cache
+    from app.db.models import EntityType
+    from app.llm import factory
+
+    endpoint = "http://gpu:9100/v1"
+    monkeypatch.setenv("PLLM_LLM__AGENT__BASE_URL", endpoint)
+    monkeypatch.setenv("PLLM_LLM__AGENT__MAX_CONCURRENT", "1")
+    monkeypatch.setenv("PLLM_LLM__EMBEDDINGS__BASE_URL", endpoint)
+    monkeypatch.setenv("PLLM_LLM__EMBEDDINGS__MODEL", "bge-m3")
+    reset_settings_cache()
+    monkeypatch.setattr(factory, "_semaphores", {})
+
+    respx.get(f"{PAPERLESS_URL}/api/tags/").mock(
+        return_value=Response(
+            200,
+            json={
+                "count": 2,
+                "next": None,
+                "results": [
+                    {
+                        "id": 6,
+                        "name": "Rente",
+                        "document_count": 2,
+                        "match": "",
+                        "matching_algorithm": 0,
+                        "is_inbox_tag": False,
+                    },
+                    {
+                        "id": 10,
+                        "name": "Riester Rente",
+                        "document_count": 1,
+                        "match": "",
+                        "matching_algorithm": 0,
+                        "is_inbox_tag": False,
+                    },
+                ],
+            },
+        )
+    )
+    vectors = {"Rente": [1.0, 0.0, 0.0], "Riester Rente": [0.9, 0.1, 0.0]}
+
+    def embed(request):
+        inputs = json.loads(request.content)["input"]
+        return Response(
+            200,
+            json={
+                "data": [
+                    {"index": i, "embedding": vectors.get(text, [0.0, 1.0, 0.0])}
+                    for i, text in enumerate(inputs)
+                ]
+            },
+        )
+
+    respx.post(f"{endpoint}/embeddings").mock(side_effect=embed)
+
+    session = Session(agent_kind=AgentKind.tag, entity_type=EntityType.tag, entity_id=6)
+    db.add(session)
+    await db.commit()
+
+    script = [
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="find_similar_entities",
+                    args={"entity_type": "tag", "name": "Rente"},
+                )
+            ]
+        ),
+        ModelResponse(parts=[TextPart(content="Rente duplicates Riester Rente.")]),
+    ]
+    agent = _scripted_agent(script)
+
+    async with asyncio.timeout(10):
+        outcome = await run_agent_turn(
+            paperless_client, db, session, "Review tag id=6.", agent=agent
+        )
+    assert outcome.output == "Rente duplicates Riester Rente."

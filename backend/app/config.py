@@ -174,6 +174,14 @@ class LlmConfig(BaseModel):
     ocr: OcrProfile = OcrProfile()
     embeddings: EmbeddingsProfile = EmbeddingsProfile()
     reranker: RerankerProfile = RerankerProfile()
+    # Safety net for ENDPOINT ADMISSION — not the per-request wall clock,
+    # which is each profile's `timeout_seconds`. This bounds how long a
+    # caller may WAIT for a permit. Deliberately far above a turn's wall
+    # clock: a legitimate wait is bounded by the in-flight request, so
+    # tripping it means a bug (see EndpointSemaphore in app/llm/factory.py)
+    # or gross over-subscription — and failing the step beats parking it in
+    # 'running' with no timeout at all. Env/file only (not UI-editable).
+    admission_timeout_seconds: float = Field(default=1800.0, gt=0)
 
 
 class PaperlessConfig(BaseModel):
