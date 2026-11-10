@@ -96,9 +96,7 @@ def _build_model(base_url: str, model: str, api_key: str, timeout: float | None)
     # catch a stream that keeps dribbling tokens).
     return TimeLimitedModel(
         TimedModel(
-            OpenAIChatModel(
-                model, provider=OpenAIProvider(base_url=base_url, api_key=api_key)
-            )
+            OpenAIChatModel(model, provider=OpenAIProvider(base_url=base_url, api_key=api_key))
         ),
         wall_timeout=timeout,
     )

@@ -33,9 +33,7 @@ DOC7 = {
 
 
 def _mock_doc7() -> None:
-    respx.get(f"{PAPERLESS_URL}/api/documents/7/").mock(
-        return_value=Response(200, json=DOC7)
-    )
+    respx.get(f"{PAPERLESS_URL}/api/documents/7/").mock(return_value=Response(200, json=DOC7))
     # get_document resolves custom-field names via the registry now.
     respx.get(f"{PAPERLESS_URL}/api/custom_fields/").mock(
         return_value=Response(200, json={"count": 0, "next": None, "results": []})
@@ -107,11 +105,17 @@ async def test_second_turn_supersedes(db, paperless_client):
     _mock_doc7()
     session = await _make_session(db)
     await run_agent_turn(
-        paperless_client, db, session, "Process document id=7.",
+        paperless_client,
+        db,
+        session,
+        "Process document id=7.",
         agent=_scripted_agent(_propose_title_script("First title")),
     )
     outcome2 = await run_agent_turn(
-        paperless_client, db, session, "Please use the German date format in the title.",
+        paperless_client,
+        db,
+        session,
+        "Please use the German date format in the title.",
         agent=_scripted_agent(_propose_title_script("Zweiter Titel")),
     )
 
@@ -134,7 +138,10 @@ async def test_user_edit_injected_into_steering(db, paperless_client):
     _mock_doc7()
     session = await _make_session(db)
     await run_agent_turn(
-        paperless_client, db, session, "Process document id=7.",
+        paperless_client,
+        db,
+        session,
+        "Process document id=7.",
         agent=_scripted_agent(_propose_title_script("Agent title")),
     )
     from sqlalchemy import select
@@ -270,12 +277,26 @@ async def test_taxonomy_agent_merge_flow(db, paperless_client):
     respx.get(f"{PAPERLESS_URL}/api/correspondents/").mock(
         return_value=Response(
             200,
-            json={"count": 2, "next": None, "results": [
-                {"id": 4, "name": "Kraxi GmbH", "document_count": 1,
-                 "match": "", "matching_algorithm": 0},
-                {"id": 8, "name": "Kraxi", "document_count": 5,
-                 "match": "", "matching_algorithm": 0},
-            ]},
+            json={
+                "count": 2,
+                "next": None,
+                "results": [
+                    {
+                        "id": 4,
+                        "name": "Kraxi GmbH",
+                        "document_count": 1,
+                        "match": "",
+                        "matching_algorithm": 0,
+                    },
+                    {
+                        "id": 8,
+                        "name": "Kraxi",
+                        "document_count": 5,
+                        "match": "",
+                        "matching_algorithm": 0,
+                    },
+                ],
+            },
         )
     )
     session = Session(agent_kind=AgentKind.correspondent)
@@ -283,13 +304,14 @@ async def test_taxonomy_agent_merge_flow(db, paperless_client):
     await db.commit()
 
     script = [
-        ModelResponse(parts=[
-            ToolCallPart(
-                tool_name="propose_merge_entities",
-                args={"entity_type": "correspondent", "source_id": 4,
-                      "target_id": 8},
-            )
-        ]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="propose_merge_entities",
+                    args={"entity_type": "correspondent", "source_id": 4, "target_id": 8},
+                )
+            ]
+        ),
         ModelResponse(parts=[TextPart(content="Proposed merging the duplicate.")]),
     ]
     state = {"i": 0}
@@ -337,9 +359,7 @@ def test_prompt_composition():
     assert default.startswith(DEFAULT_BASE_PROMPT)
     assert "process ONE document" in default
 
-    tuned = compose_prompt(
-        AgentKind.tag, base="My tiny model prompt.", addition="Nur Deutsch."
-    )
+    tuned = compose_prompt(AgentKind.tag, base="My tiny model prompt.", addition="Nur Deutsch.")
     assert tuned.startswith("My tiny model prompt.")
     assert DEFAULT_BASE_PROMPT not in tuned
     assert "review ONE tag" in tuned
@@ -390,9 +410,7 @@ async def test_streaming_indexerror_fallback_discards_aborted_drafts(
                 raise IndexError("list index out of range")
             return await inner.run(*args, **kwargs)
 
-    outcome = await run_agent_turn(
-        paperless_client, db, session, "go", agent=FlakyAgent()
-    )
+    outcome = await run_agent_turn(paperless_client, db, session, "go", agent=FlakyAgent())
     assert calls["n"] == 2  # fallback actually re-ran
 
     from sqlalchemy import select
@@ -406,9 +424,7 @@ async def test_streaming_indexerror_fallback_discards_aborted_drafts(
 
 
 @respx.mock
-async def test_finalize_never_supersedes_a_concurrently_applied_proposal(
-    db, paperless_client
-):
+async def test_finalize_never_supersedes_a_concurrently_applied_proposal(db, paperless_client):
     """AUDIT BC-F2: the user applies the open proposal WHILE the next
     turn runs — finalize must not overwrite `applied` with `superseded`
     from its stale turn-start snapshot."""
@@ -422,8 +438,7 @@ async def test_finalize_never_supersedes_a_concurrently_applied_proposal(
     old = Proposal(
         session_id=session.id,
         kind="update_document_metadata",
-        agent_payload={"kind": "update_document_metadata", "document_id": 7,
-                       "title": "Old title"},
+        agent_payload={"kind": "update_document_metadata", "document_id": 7, "title": "Old title"},
         status=ProposalStatus.pending,
         entity_type=EntityType.document,
         entity_id=7,
@@ -447,9 +462,7 @@ async def test_finalize_never_supersedes_a_concurrently_applied_proposal(
         # Mid-turn (between model requests): the user applies the OLD
         # proposal in another request.
         await db.execute(
-            update(Proposal)
-            .where(Proposal.id == old.id)
-            .values(status=ProposalStatus.applied)
+            update(Proposal).where(Proposal.id == old.id).values(status=ProposalStatus.applied)
         )
         await db.commit()
         return ModelResponse(parts=[TextPart(content="done")])
@@ -457,9 +470,7 @@ async def test_finalize_never_supersedes_a_concurrently_applied_proposal(
     agent = Agent(FunctionModel(fn), deps_type=AgentDeps, tools=list(ALL_TOOLS))
     await run_agent_turn(paperless_client, db, session, "go", agent=agent)
 
-    rows = {
-        p.id: p for p in (await db.scalars(select(Proposal))).all()
-    }
+    rows = {p.id: p for p in (await db.scalars(select(Proposal))).all()}
     await db.refresh(rows[old.id])
     assert rows[old.id].status == ProposalStatus.applied  # journal intact
     new = next(p for p in rows.values() if p.id != old.id)

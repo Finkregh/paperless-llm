@@ -8,8 +8,11 @@ from app.llm.factory import _settings_from, embeddings_semaphore, llm_semaphore
 
 def test_standard_sampling_maps_to_native_fields():
     s = SamplingOverrides(
-        temperature=0.2, top_p=0.9, max_tokens=3000,
-        presence_penalty=1.5, frequency_penalty=0.4,
+        temperature=0.2,
+        top_p=0.9,
+        max_tokens=3000,
+        presence_penalty=1.5,
+        frequency_penalty=0.4,
     )
     out = _settings_from(s, "server_default", 60)
     assert out["temperature"] == 0.2
@@ -49,9 +52,7 @@ def test_embeddings_semaphore_shares_agent_endpoint_admission(monkeypatch):
     monkeypatch.setenv("PLLM_LLM__AGENT__BASE_URL", "http://gpu:9000/v1")
     reset_settings_cache()
     agent = get_settings().llm.agent
-    assert embeddings_semaphore() is llm_semaphore(
-        agent.base_url, agent.max_concurrent
-    )
+    assert embeddings_semaphore() is llm_semaphore(agent.base_url, agent.max_concurrent)
 
     # A dedicated embeddings endpoint gets its own cap.
     monkeypatch.setenv("PLLM_LLM__EMBEDDINGS__BASE_URL", "http://tei:8080/v1")
