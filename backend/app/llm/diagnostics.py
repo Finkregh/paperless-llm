@@ -402,8 +402,11 @@ async def run_llm_detect(profile: ProfileName) -> LlmDetectResult:
         page = BinaryContent(data=_page_png(dpi), media_type="image/png")
         async with sem:
             page_run = await agent.run(["Reply with the single word: ok", page])
-        overhead = text_run.usage().input_tokens or 0
-        with_page = page_run.usage().input_tokens or 0
+        # `AgentRunResult.usage` is a PROPERTY (pydantic-ai >= 2.x);
+        # calling it raised TypeError into the best-effort except below,
+        # so the per-page cost was never measured.
+        overhead = text_run.usage.input_tokens or 0
+        with_page = page_run.usage.input_tokens or 0
         if with_page > overhead > 0:
             result.tokens_per_image = with_page - overhead
             if result.context_length:
