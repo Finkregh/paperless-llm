@@ -12,11 +12,12 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from pydantic_ai.usage import UsageLimits
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.deps import AgentDeps
@@ -286,13 +287,16 @@ async def run_agent_turn(
                 and old.entity_type == p.entity_type
                 and old.entity_id == p.entity_id
             ):
-                res = await db.execute(
-                    update(Proposal)
-                    .where(
-                        Proposal.id == old.id,
-                        Proposal.status.in_((ProposalStatus.draft, ProposalStatus.pending)),
-                    )
-                    .values(status=ProposalStatus.superseded)
+                res = cast(
+                    "CursorResult[Any]",
+                    await db.execute(
+                        update(Proposal)
+                        .where(
+                            Proposal.id == old.id,
+                            Proposal.status.in_((ProposalStatus.draft, ProposalStatus.pending)),
+                        )
+                        .values(status=ProposalStatus.superseded)
+                    ),
                 )
                 if res.rowcount:
                     p.supersedes_id = old.id

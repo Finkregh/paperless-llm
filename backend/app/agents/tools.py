@@ -654,7 +654,9 @@ async def propose_update_entity(
     only the fields to change — values identical to the entity's current
     state are rejected as no-ops."""
     entity = await _require_entity(ctx, entity_type, entity_id)
-    changes = {
+    # Mixed value types by construction (str / int / bool): the dict is a
+    # change-set, not a column map — hence the Any values.
+    changes: dict[str, Any] = {
         k: v
         for k, v in (
             ("name", name),
